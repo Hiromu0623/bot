@@ -15,9 +15,11 @@ const {
     REST,
     Routes,
     SlashCommandBuilder,
-    MessageFlags
+    MessageFlags,
+    AttachmentBuilder
 } = require('discord.js');
 const http = require('http');
+const { createCanvas } = require('canvas'); // 画像認証用
 
 // --- Renderのステータス(In Progress)解決用ダミーWebサーバー ---
 const PORT = process.env.PORT || 3000;
@@ -44,15 +46,50 @@ const REPORT_CHANNEL_ID = '1517865558136066201'; // 報告・注意ログ用チ�
 const AD_CHANNEL_ID = '1517868958768693309';     // 宣伝許可チャンネル
 const LOG_CHANNEL_ID = '1520424091792838779';    // 退出/キック/BAN/タイムアウト通知用チャンネル
 const CONSULT_CHANNEL_ID = '1517760332255461577'; // 相談・チケット用チャンネル
-const VERIFY_CHANNEL_ID = '1517692680191344690';  // 認証用チャンネル（指定ID）
+const VERIFY_CHANNEL_ID = '1517692680191344690';  // 認証用チャンネル
 const BOT_ROLE_ID = '1520422736126804150';        // Bot用初期ロール
-const VERIFIED_ROLE_ID = '1517868958768693309';   // 認証完了時ロールID
+const VERIFIED_ROLE_ID = '1517686961765093397';   // 認証完了時ロールID (ご指定のID)
 
 // メモリデータ保持用
-const userMessageTracker = new Map(); // スパム監視用 { history: [{ content, timestamp }], lastClear }
+const userMessageTracker = new Map(); 
 const userSpamViolations = new Map();
 const userAdViolations = new Map();
-const consultTargetUsers = new Map(); // 返信ボタンを押した管理者の操作メモリ (管理者のID -> 相談者のID)
+const consultTargetUsers = new Map(); 
+const captchaCodes = new Map(); // 画像認証コード保存用 (userId -> code)
+
+// 画像認証コード（4桁のランダム数字）の生成関数
+function generateCaptchaCode() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+// 簡易キャプチャ画像生成関数
+function createCaptchaImage(code) {
+    const canvas = createCanvas(150, 50);
+    const ctx = canvas.getContext('2d');
+
+    // 背景
+    ctx.fillStyle = '#23272A';
+    ctx.fillRect(0, 0, 150, 50);
+
+    // ノイズ（邪魔な線）
+    ctx.strokeStyle = '#4F545C';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(Math.random() * 150, Math.random() * 50);
+        ctx.lineTo(Math.random() * 150, Math.random() * 50);
+        ctx.stroke();
+    }
+
+    // 文字描画
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillStyle = '#00FF99';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(code, 75, 25);
+
+    return canvas.toBuffer();
+}
 
 // メモリリーク防止：古い違反ログや履歴を1時間に1回クリーンアップ
 setInterval(() => {
@@ -63,7 +100,7 @@ setInterval(() => {
     }
 }, 3600000);
 
-// グローバルエラーハンドラー（Bot落ち防止）
+// グローバルエラーハンドラー
 process.on('unhandledRejection', (reason) => {
     console.error('未処理のPromise拒否:', reason);
 });
@@ -82,7 +119,6 @@ const commands = [
 client.once('ready', async () => {
     console.log(`${client.user.tag} 起動完了`);
 
-    // Slash Commandの登録
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
         await rest.put(
@@ -113,7 +149,7 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 // -------------------------------------------------------------
-// 2. サーバー退出・キック・BAN時 (指定チャンネル: 1520424091792838779)
+// 2. サーバー退出・キック・BAN時
 // -------------------------------------------------------------
 client.on('guildMemberRemove', async (member) => {
     try {
@@ -146,7 +182,7 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 // -------------------------------------------------------------
-// 3. タイムアウト検知 (指定チャンネル: 1520424091792838779)
+// 3. タイムアウト検知
 // -------------------------------------------------------------
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
     try {
@@ -179,16 +215,14 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.reply({ content: '管理者権限が必要です。', flags: MessageFlags.Ephemeral });
             }
 
-            // 認証パネルの送信 (指定の1517692680191344690へ送信)
+            // 認証パネルの送信
             const verifyChannel = interaction.guild.channels.cache.get(VERIFY_CHANNEL_ID) || interaction.channel;
             
-            // 画像のデザインに合わせた埋め込み（青色の盾アイコン）
             const verifyEmbed = new EmbedBuilder()
                 .setTitle('🛡️ サーバー認証')
                 .setDescription('下のボタンを押して画像認証を完了させてください。')
-                .setColor(0x2B2D31); // Discordダークテーマになじむ色合い
+                .setColor(0x2B2D31);
 
-            // 画像通りの「🔓 認証を開始する」青色（Primary）ボタン
             const verifyRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('verify_button')
@@ -198,7 +232,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await verifyChannel.send({ embeds: [verifyEmbed], components: [verifyRow] });
 
-            // 相談・チケットパネルの送信 (1517760332255461577 に送る用)
+            // 相談・チケットパネルの送信
             const consultChannel = interaction.guild.channels.cache.get(CONSULT_CHANNEL_ID);
             if (consultChannel) {
                 const consultEmbed = new EmbedBuilder()
@@ -213,7 +247,7 @@ client.on('interactionCreate', async (interaction) => {
                         { label: '質問・相談', value: '質問・相談', description: '一般的な相談や質問はこちら' },
                         { label: '通報', value: '通報', description: '規約違反者や問題行動の報告' },
                         { label: '提案', value: '提案', description: 'サーバーへの改善アイデアや提案' },
-                        { label: '不具合報告', value: '不具合報告', description: 'Botやサーバーの不具合報告' }
+                        { label: '不具合報告', value: '不具合報告', description: '不具合報告はこちら' }
                     ]);
 
                 const ticketButton = new ButtonBuilder()
@@ -233,24 +267,45 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- B. ボタンの処理 ---
         if (interaction.isButton()) {
-            // 認証ボタン
+            // 認証開始ボタンが押された時
             if (interaction.customId === 'verify_button') {
                 const member = interaction.member;
-                const role = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
 
-                if (role) {
-                    if (member.roles.cache.has(role.id)) {
-                        return await interaction.reply({ content: '✅ すでに認証済みです！', flags: MessageFlags.Ephemeral });
-                    }
-                    await member.roles.add(role);
+                // 指定ロール(1517686961765093397)を持っているか判定
+                if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
+                    return await interaction.reply({ content: '✅ すでに認証済みです！', flags: MessageFlags.Ephemeral });
                 }
 
-                // 認証時に 📝 (:pencil:) のリアクションを付ける
-                if (interaction.message) {
-                    await interaction.message.react('📝').catch(() => {});
-                }
+                // 未認証の場合：画像コードを生成して認証モーダル（入力フォーム）を表示
+                const code = generateCaptchaCode();
+                captchaCodes.set(interaction.user.id, code);
 
-                return await interaction.reply({ content: '🎉 認証が完了しました！サーバーをお楽しみください。', flags: MessageFlags.Ephemeral });
+                const buffer = createCaptchaImage(code);
+                const attachment = new AttachmentBuilder(buffer, { name: 'captcha.png' });
+
+                const modal = new ModalBuilder()
+                    .setCustomId('captcha_modal')
+                    .setTitle('画像認証');
+
+                const captchaInput = new TextInputBuilder()
+                    .setCustomId('captcha_input')
+                    .setLabel('画像に表示されている4桁の数字を入力')
+                    .setPlaceholder('例: 1234')
+                    .setStyle(TextInputStyle.Short)
+                    .setMinLength(4)
+                    .setMaxLength(4)
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(captchaInput));
+
+                // 一時的にキャプチャ画像を送信してからモーダルを開く
+                await interaction.reply({ 
+                    content: '📷 以下の画像に書かれている**4桁の数字**をフォームに入力してください。', 
+                    files: [attachment], 
+                    flags: MessageFlags.Ephemeral 
+                });
+
+                return;
             }
 
             // チケット発行ボタン
@@ -265,9 +320,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
-                const firstActionRow = new ActionRowBuilder().addComponents(input);
-                modal.addComponents(firstActionRow);
-
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
                 await interaction.showModal(modal);
                 return;
             }
@@ -287,21 +340,18 @@ client.on('interactionCreate', async (interaction) => {
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
-                const row = new ActionRowBuilder().addComponents(replyInput);
-                modal.addComponents(row);
-
+                modal.addComponents(new ActionRowBuilder().addComponents(replyInput));
                 await interaction.showModal(modal);
                 return;
             }
         }
 
-        // --- C. セレクトメニュー（カテゴリー選択）の処理 ---
+        // --- C. セレクトメニューの処理 ---
         const isSelectMenu = (typeof interaction.isStringSelectMenu === 'function' && interaction.isStringSelectMenu()) ||
                              (typeof interaction.isSelectMenu === 'function' && interaction.isSelectMenu());
 
         if (isSelectMenu && interaction.customId === 'consult_category_select') {
             const selectedCategory = interaction.values[0];
-
             await interaction.reply({ 
                 content: `カテゴリー「**${selectedCategory}**」を選択しました。下の「チケットを発行する」ボタンを押して内容を入力してください。`, 
                 flags: MessageFlags.Ephemeral 
@@ -311,6 +361,31 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- D. モーダル送信の処理 ---
         if (interaction.isModalSubmit()) {
+            // キャプチャ画像認証の解答入力
+            if (interaction.customId === 'captcha_modal') {
+                const inputCode = interaction.fields.getTextInputValue('captcha_input');
+                const correctCode = captchaCodes.get(interaction.user.id);
+
+                if (!correctCode || inputCode !== correctCode) {
+                    captchaCodes.delete(interaction.user.id);
+                    return await interaction.reply({ content: '❌ 数字が違います。もう一度「🔓 認証を開始する」ボタンを押してやり直してください。', flags: MessageFlags.Ephemeral });
+                }
+
+                // 認証成功時処理
+                captchaCodes.delete(interaction.user.id);
+                const role = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
+
+                if (role) {
+                    await interaction.member.roles.add(role);
+                }
+
+                if (interaction.message) {
+                    await interaction.message.react('📝').catch(() => {});
+                }
+
+                return await interaction.reply({ content: '🎉 画像認証が完了し、ロールを付与しました！サーバーをお楽しみください。', flags: MessageFlags.Ephemeral });
+            }
+
             // ユーザーからの相談送信モーダル
             if (interaction.customId === 'consult_modal') {
                 const consultContent = interaction.fields.getTextInputValue('consult_content');
@@ -354,7 +429,7 @@ client.on('interactionCreate', async (interaction) => {
                     await targetUser.send(`📩 **運営からの返信**:\n${replyText}`);
                     await interaction.reply({ content: `✅ <@${targetUserId}> さんへDMで返信を送信しました。`, flags: MessageFlags.Ephemeral });
                 } catch (e) {
-                    await interaction.reply({ content: '❌ DMの送信に失敗しました。（ユーザーがDMを閉じる設定にしている可能性があります）', flags: MessageFlags.Ephemeral });
+                    await interaction.reply({ content: '❌ DMの送信に失敗しました。', flags: MessageFlags.Ephemeral });
                 } finally {
                     consultTargetUsers.delete(interaction.user.id);
                 }
@@ -384,7 +459,6 @@ client.on('messageCreate', async (message) => {
         const content = message.content || '';
         const reportChannel = message.guild.channels.cache.get(REPORT_CHANNEL_ID);
 
-        // --- コマンド風テキスト送信 (!通報, !相談 等) の後換性維持 ---
         const prefixes = ['!通報', '!提案', '!質問', '!不具合', '!相談'];
         const matchedPrefix = prefixes.find(p => content.startsWith(p));
 
@@ -414,7 +488,7 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
-        // --- A. スパム検知（1分間に15回同じ発言） ---
+        // --- A. スパム検知 ---
         if (content.trim() !== '') {
             const now = Date.now();
             let userTracker = userMessageTracker.get(userId) || { history: [] };
@@ -443,7 +517,6 @@ client.on('messageCreate', async (message) => {
 
                 if (violations === 1) {
                     await message.author.send('⚠️ **注意**: 1分間に同じ発言を15回行ったためメッセージが削除されました。もう一度行うと1日間タイムアウトになります。').catch(() => {});
-
                     if (reportChannel) {
                         await reportChannel.send(`@${username}さんが、${content}という発言を15回発言したので、メッセージを削除しました。`).catch(() => {});
                     }
@@ -476,7 +549,6 @@ client.on('messageCreate', async (message) => {
 
             if (violations === 1) {
                 await message.author.send(`⚠️ **注意**: 許可されていないチャンネル（#${channelName}）でサーバーの宣伝を行ったためメッセージが削除されました。もう一度行うと1日間タイムアウトになります。`).catch(() => {});
-
                 if (reportChannel) {
                     await reportChannel.send(`@${username}さんが宣伝以外のチャンネル(${channelName})でサーバーの宣伝をしたため、削除されました。`).catch(() => {});
                 }
