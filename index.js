@@ -14,7 +14,8 @@ const {
     PermissionFlagsBits,
     REST,
     Routes,
-    SlashCommandBuilder
+    SlashCommandBuilder,
+    MessageFlags
 } = require('discord.js');
 const http = require('http');
 
@@ -169,9 +170,13 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 client.on('interactionCreate', async (interaction) => {
     try {
         // --- A. スラッシュコマンド (/setup) ---
-        if (interaction.isChatInput() && interaction.commandName === 'setup') {
+        // isChatInput または isCommand の両方に対応
+        const isSlashCommand = (typeof interaction.isChatInput === 'function' && interaction.isChatInput()) || 
+                               (typeof interaction.isCommand === 'function' && interaction.isCommand());
+
+        if (isSlashCommand && interaction.commandName === 'setup') {
             if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
-                return await interaction.reply({ content: '管理者権限が必要です。', ephemeral: true });
+                return await interaction.reply({ content: '管理者権限が必要です。', flags: MessageFlags.Ephemeral });
             }
 
             // 認証パネルの送信
@@ -218,7 +223,7 @@ client.on('interactionCreate', async (interaction) => {
                 await consultChannel.send({ embeds: [consultEmbed], components: [row1, row2] });
             }
 
-            await interaction.reply({ content: '✅ 各パネルの設置が完了しました。', ephemeral: true });
+            await interaction.reply({ content: '✅ 各パネルの設置が完了しました。', flags: MessageFlags.Ephemeral });
             return;
         }
 
@@ -231,7 +236,7 @@ client.on('interactionCreate', async (interaction) => {
 
                 if (role) {
                     if (member.roles.cache.has(role.id)) {
-                        return await interaction.reply({ content: '✅ すでに認証済みです！', ephemeral: true });
+                        return await interaction.reply({ content: '✅ すでに認証済みです！', flags: MessageFlags.Ephemeral });
                     }
                     await member.roles.add(role);
                 }
@@ -241,7 +246,7 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.message.react('📝').catch(() => {});
                 }
 
-                return await interaction.reply({ content: '🎉 認証が完了しました！サーバーをお楽しみください。', ephemeral: true });
+                return await interaction.reply({ content: '🎉 認証が完了しました！サーバーをお楽しみください。', flags: MessageFlags.Ephemeral });
             }
 
             // チケット発行ボタン
@@ -287,13 +292,15 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // --- C. セレクトメニュー（カテゴリー選択）の処理 ---
-        if (interaction.isStringSelectMenu() && interaction.customId === 'consult_category_select') {
+        const isSelectMenu = (typeof interaction.isStringSelectMenu === 'function' && interaction.isStringSelectMenu()) ||
+                             (typeof interaction.isSelectMenu === 'function' && interaction.isSelectMenu());
+
+        if (isSelectMenu && interaction.customId === 'consult_category_select') {
             const selectedCategory = interaction.values[0];
 
-            // 選択したカテゴリーを一時的にカスタムIDに埋め込む等の管理（もしくは確認応答）
             await interaction.reply({ 
                 content: `カテゴリー「**${selectedCategory}**」を選択しました。下の「チケットを発行する」ボタンを押して内容を入力してください。`, 
-                ephemeral: true 
+                flags: MessageFlags.Ephemeral 
             });
             return;
         }
@@ -325,8 +332,7 @@ client.on('interactionCreate', async (interaction) => {
                     await consultChannel.send({ embeds: [embed], components: [replyBtn] });
                 }
 
-                // 送信者には完了した旨だけを伝える（新チャンネル等は開かない）
-                await interaction.reply({ content: '✅ 内容を送信しました。対応をお待ちください。', ephemeral: true });
+                await interaction.reply({ content: '✅ 内容を送信しました。対応をお待ちください。', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -336,15 +342,15 @@ client.on('interactionCreate', async (interaction) => {
                 const targetUserId = consultTargetUsers.get(interaction.user.id);
 
                 if (!targetUserId) {
-                    return await interaction.reply({ content: '❌ 返信対象のユーザーが見つかりませんでした。', ephemeral: true });
+                    return await interaction.reply({ content: '❌ 返信対象のユーザーが見つかりませんでした。', flags: MessageFlags.Ephemeral });
                 }
 
                 try {
                     const targetUser = await client.users.fetch(targetUserId);
                     await targetUser.send(`📩 **運営からの返信**:\n${replyText}`);
-                    await interaction.reply({ content: `✅ <@${targetUserId}> さんへDMで返信を送信しました。`, ephemeral: true });
+                    await interaction.reply({ content: `✅ <@${targetUserId}> さんへDMで返信を送信しました。`, flags: MessageFlags.Ephemeral });
                 } catch (e) {
-                    await interaction.reply({ content: '❌ DMの送信に失敗しました。（ユーザーがDMを閉じる設定にしている可能性があります）', ephemeral: true });
+                    await interaction.reply({ content: '❌ DMの送信に失敗しました。（ユーザーがDMを閉じる設定にしている可能性があります）', flags: MessageFlags.Ephemeral });
                 } finally {
                     consultTargetUsers.delete(interaction.user.id);
                 }
@@ -353,7 +359,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     } catch (error) {
         console.error('インタラクション処理エラー:', error);
-        const errMsg = { content: '❌ 処理中にエラーが発生しました。', ephemeral: true };
+        const errMsg = { content: '❌ 処理中にエラーが発生しました。', flags: MessageFlags.Ephemeral };
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp(errMsg).catch(() => {});
         } else {
@@ -409,19 +415,15 @@ client.on('messageCreate', async (message) => {
             const now = Date.now();
             let userTracker = userMessageTracker.get(userId) || { history: [] };
 
-            // 1分(60000ms)以内の履歴だけに絞り込み
             userTracker.history = userTracker.history.filter(m => now - m.timestamp < 60000);
             userTracker.history.push({ content: content, timestamp: now });
             userMessageTracker.set(userId, userTracker);
 
-            // 同じ内容の発言の回数をカウント
             const sameMessageCount = userTracker.history.filter(m => m.content === content).length;
 
             if (sameMessageCount >= 15) {
-                // 履歴リセット
                 userMessageTracker.set(userId, { history: [] });
 
-                // 15回連投された同一メッセージをまとめて一括削除
                 try {
                     const fetchedMessages = await message.channel.messages.fetch({ limit: 50 });
                     const userSpamMessages = fetchedMessages.filter(m => m.author.id === userId && m.content === content);
@@ -436,14 +438,12 @@ client.on('messageCreate', async (message) => {
                 userSpamViolations.set(userId, violations);
 
                 if (violations === 1) {
-                    // 1回目：DM注意 ＋ ログ送信
                     await message.author.send('⚠️ **注意**: 1分間に同じ発言を15回行ったためメッセージが削除されました。もう一度行うと1日間タイムアウトになります。').catch(() => {});
 
                     if (reportChannel) {
                         await reportChannel.send(`@${username}さんが、${content}という発言を15回発言したので、メッセージを削除しました。`).catch(() => {});
                     }
                 } else if (violations >= 2) {
-                    // 2回目：1日タイムアウト ＋ ログ送信
                     try {
                         if (message.member?.moderatable) {
                             await message.member.timeout(24 * 60 * 60 * 1000, 'スパム連投2回目');
@@ -471,14 +471,12 @@ client.on('messageCreate', async (message) => {
             const channelName = message.channel.name;
 
             if (violations === 1) {
-                // 1回目：DM注意 ＋ ログ送信
                 await message.author.send(`⚠️ **注意**: 許可されていないチャンネル（#${channelName}）でサーバーの宣伝を行ったためメッセージが削除されました。もう一度行うと1日間タイムアウトになります。`).catch(() => {});
 
                 if (reportChannel) {
                     await reportChannel.send(`@${username}さんが宣伝以外のチャンネル(${channelName})でサーバーの宣伝をしたため、削除されました。`).catch(() => {});
                 }
             } else if (violations >= 2) {
-                // 2回目：1日タイムアウト ＋ ログ送信
                 try {
                     if (message.member?.moderatable) {
                         await message.member.timeout(24 * 60 * 60 * 1000, '他サーバー宣伝2回目');
