@@ -180,8 +180,7 @@ const consultChannel = interaction.guild.channels.cache.get(CONSULT_CHANNEL_ID);
 if (consultChannel) {
 const consultEmbed = new EmbedBuilder()
 .setTitle(' 相談・サポート窓口')
-.setDescription('カテゴリーを選択し、「チケットを発行する」ボタンを押してフォームを入力
-してください。')
+.setDescription('カテゴリーを選択し、「チケットを発行する」ボタンを押してフォームを入力してください。');
 .setColor(0x0099FF);
 const selectMenu = new StringSelectMenuBuilder()
 .setCustomId('consult_category_select')
