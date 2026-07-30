@@ -186,8 +186,7 @@ const selectMenu = new StringSelectMenuBuilder()
 .setCustomId('consult_category_select')
 .setPlaceholder('カテゴリーを選択してください')
 .addOptions([
-{ label: '質問・相談', value: '質問・相談', description: '一般的な相談や質問は
-こちら' },
+{ label: '質問・相談', value: '質問・相談', description: '一般的な相談や質問はこちらから' }
 { label: '通報', value: '通報', description: '規約違反者や問題行動の報告' },
 { label: '提案', value: '提案', description: 'サーバーへの改善アイデアや提
 案' },
