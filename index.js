@@ -44,6 +44,7 @@ const REPORT_CHANNEL_ID = '1517865558136066201'; // 報告・注意ログ用チ�
 const AD_CHANNEL_ID = '1517868958768693309';     // 宣伝許可チャンネル
 const LOG_CHANNEL_ID = '1520424091792838779';    // 退出/キック/BAN/タイムアウト通知用チャンネル
 const CONSULT_CHANNEL_ID = '1517760332255461577'; // 相談・チケット用チャンネル
+const VERIFY_CHANNEL_ID = '1517692680191344690';  // 認証用チャンネル（指定ID）
 const BOT_ROLE_ID = '1520422736126804150';        // Bot用初期ロール
 const VERIFIED_ROLE_ID = '1517868958768693309';   // 認証完了時ロールID
 
@@ -170,7 +171,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 client.on('interactionCreate', async (interaction) => {
     try {
         // --- A. スラッシュコマンド (/setup) ---
-        // isChatInput または isCommand の両方に対応
         const isSlashCommand = (typeof interaction.isChatInput === 'function' && interaction.isChatInput()) || 
                                (typeof interaction.isCommand === 'function' && interaction.isCommand());
 
@@ -179,20 +179,24 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.reply({ content: '管理者権限が必要です。', flags: MessageFlags.Ephemeral });
             }
 
-            // 認証パネルの送信
+            // 認証パネルの送信 (指定の1517692680191344690へ送信)
+            const verifyChannel = interaction.guild.channels.cache.get(VERIFY_CHANNEL_ID) || interaction.channel;
+            
+            // 画像のデザインに合わせた埋め込み（青色の盾アイコン）
             const verifyEmbed = new EmbedBuilder()
-                .setTitle('🔒 サーバー認証')
-                .setDescription('下の「認証する」ボタンを押してサーバーへのアクセス権を取得してください。')
-                .setColor(0x00FF99);
+                .setTitle('🛡️ サーバー認証')
+                .setDescription('下のボタンを押して画像認証を完了させてください。')
+                .setColor(0x2B2D31); // Discordダークテーマになじむ色合い
 
+            // 画像通りの「🔓 認証を開始する」青色（Primary）ボタン
             const verifyRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('verify_button')
-                    .setLabel('認証する')
-                    .setStyle(ButtonStyle.Success)
+                    .setLabel('🔓 認証を開始する')
+                    .setStyle(ButtonStyle.Primary)
             );
 
-            await interaction.channel.send({ embeds: [verifyEmbed], components: [verifyRow] });
+            await verifyChannel.send({ embeds: [verifyEmbed], components: [verifyRow] });
 
             // 相談・チケットパネルの送信 (1517760332255461577 に送る用)
             const consultChannel = interaction.guild.channels.cache.get(CONSULT_CHANNEL_ID);
