@@ -16,6 +16,16 @@ const {
     Routes,
     SlashCommandBuilder
 } = require('discord.js');
+const http = require('http');
+
+// --- Renderのステータス(In Progress)解決用ダミーWebサーバー ---
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Discord Bot is running!');
+}).listen(PORT, () => {
+    console.log(`Renderヘルスチェック用サーバーが Port ${PORT} で起動しました`);
+});
 
 // --- クライアント初期化 ---
 const client = new Client({
