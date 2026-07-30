@@ -15,11 +15,9 @@ const {
     REST,
     Routes,
     SlashCommandBuilder,
-    MessageFlags,
-    AttachmentBuilder
+    MessageFlags
 } = require('discord.js');
 const http = require('http');
-const { createCanvas } = require('canvas'); // 画像認証用
 
 // --- Renderのステータス(In Progress)解決用ダミーWebサーバー ---
 const PORT = process.env.PORT || 3000;
@@ -48,7 +46,7 @@ const LOG_CHANNEL_ID = '1520424091792838779';    // 退出/キック/BAN/タイ�
 const CONSULT_CHANNEL_ID = '1517760332255461577'; // 相談・チケット用チャンネル
 const VERIFY_CHANNEL_ID = '1517692680191344690';  // 認証用チャンネル
 const BOT_ROLE_ID = '1520422736126804150';        // Bot用初期ロール
-const VERIFIED_ROLE_ID = '1517686961765093397';   // 認証完了時ロールID (ご指定のID)
+const VERIFIED_ROLE_ID = '1517686961765093397';   // 認証完了時ロールID
 
 // メモリデータ保持用
 const userMessageTracker = new Map(); 
@@ -57,38 +55,9 @@ const userAdViolations = new Map();
 const consultTargetUsers = new Map(); 
 const captchaCodes = new Map(); // 画像認証コード保存用 (userId -> code)
 
-// 画像認証コード（4桁のランダム数字）の生成関数
+// 4桁のランダム数字を生成
 function generateCaptchaCode() {
     return Math.floor(1000 + Math.random() * 9000).toString();
-}
-
-// 簡易キャプチャ画像生成関数
-function createCaptchaImage(code) {
-    const canvas = createCanvas(150, 50);
-    const ctx = canvas.getContext('2d');
-
-    // 背景
-    ctx.fillStyle = '#23272A';
-    ctx.fillRect(0, 0, 150, 50);
-
-    // ノイズ（邪魔な線）
-    ctx.strokeStyle = '#4F545C';
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 4; i++) {
-        ctx.beginPath();
-        ctx.moveTo(Math.random() * 150, Math.random() * 50);
-        ctx.lineTo(Math.random() * 150, Math.random() * 50);
-        ctx.stroke();
-    }
-
-    // 文字描画
-    ctx.font = 'bold 28px sans-serif';
-    ctx.fillStyle = '#00FF99';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(code, 75, 25);
-
-    return canvas.toBuffer();
 }
 
 // メモリリーク防止：古い違反ログや履歴を1時間に1回クリーンアップ
@@ -276,20 +245,44 @@ client.on('interactionCreate', async (interaction) => {
                     return await interaction.reply({ content: '✅ すでに認証済みです！', flags: MessageFlags.Ephemeral });
                 }
 
-                // 未認証の場合：画像コードを生成して認証モーダル（入力フォーム）を表示
+                // 未認証の場合：4桁コード生成 & DummyImage URLでキャプチャ画像作成
                 const code = generateCaptchaCode();
                 captchaCodes.set(interaction.user.id, code);
 
-                const buffer = createCaptchaImage(code);
-                const attachment = new AttachmentBuilder(buffer, { name: 'captcha.png' });
+                // アプリケーション内追加パッケージ不要の動的画像生成URL
+                const imageUrl = `https://dummyimage.com/300x100/2f3136/00ff99.png&text=${code}`;
 
+                const captchaEmbed = new EmbedBuilder()
+                    .setTitle('📷 画像認証')
+                    .setDescription('以下の画像に表示されている **4桁の数字** を「数字を入力する」ボタンから入力してください。')
+                    .setImage(imageUrl)
+                    .setColor(0x00FF99);
+
+                const inputButton = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('submit_captcha_code_btn')
+                        .setLabel('数字を入力する')
+                        .setStyle(ButtonStyle.Success)
+                );
+
+                await interaction.reply({ 
+                    embeds: [captchaEmbed], 
+                    components: [inputButton], 
+                    flags: MessageFlags.Ephemeral 
+                });
+
+                return;
+            }
+
+            // 画像認証の入力用ボタン
+            if (interaction.customId === 'submit_captcha_code_btn') {
                 const modal = new ModalBuilder()
                     .setCustomId('captcha_modal')
-                    .setTitle('画像認証');
+                    .setTitle('画像認証コード入力');
 
                 const captchaInput = new TextInputBuilder()
                     .setCustomId('captcha_input')
-                    .setLabel('画像に表示されている4桁の数字を入力')
+                    .setLabel('画像に書かれていた4桁の数字')
                     .setPlaceholder('例: 1234')
                     .setStyle(TextInputStyle.Short)
                     .setMinLength(4)
@@ -297,14 +290,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setRequired(true);
 
                 modal.addComponents(new ActionRowBuilder().addComponents(captchaInput));
-
-                // 一時的にキャプチャ画像を送信してからモーダルを開く
-                await interaction.reply({ 
-                    content: '📷 以下の画像に書かれている**4桁の数字**をフォームに入力してください。', 
-                    files: [attachment], 
-                    flags: MessageFlags.Ephemeral 
-                });
-
+                await interaction.showModal(modal);
                 return;
             }
 
