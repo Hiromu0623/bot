@@ -45,7 +45,7 @@ const AD_CHANNEL_ID = '1517868958768693309';         // 宣伝許可チャンネ
 const LOG_CHANNEL_ID = '1520424091792838779';        // 退出/キック/BAN/タイムアウト通知用チャンネル
 const CONSULT_CHANNEL_ID = '1517760332255461577';    // 相談・チケット用チャンネル
 const VERIFY_CHANNEL_ID = '1517692680191344690';     // 認証用チャンネル
-const SELF_INTRO_CHANNEL_ID = '1517865558136066201'; // ★自己紹介を投稿するチャンネルID（必要に応じて変更してください）
+const SELF_INTRO_CHANNEL_ID = '1517868958768693309'; // ★自己紹介を投稿する公開チャンネルIDに変更してください
 const BOT_ROLE_ID = '1520422736126804150';            // Bot用初期ロール
 const VERIFIED_ROLE_ID = '1517686961765093397';       // 認証完了時ロールID
 
@@ -82,7 +82,7 @@ process.on('uncaughtException', (err) => {
 const commands = [
     new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('認証・相談・自己紹介パネルを設置します（管理者専用）')
+        .setDescription('認証パネルおよび相談パネルを設置します（管理者専用）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ];
 
@@ -172,7 +172,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 });
 
 // -------------------------------------------------------------
-// 4. インタラクション処理 (認証・チケット・自己紹介・モーダル・返信機能・/setup)
+// 4. インタラクション処理 (認証・チケット・モーダル・返信機能・/setup)
 // -------------------------------------------------------------
 client.on('interactionCreate', async (interaction) => {
     try {
@@ -187,6 +187,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // 認証パネルの送信
             const verifyChannel = interaction.guild.channels.cache.get(VERIFY_CHANNEL_ID) || interaction.channel;
+            
             const verifyEmbed = new EmbedBuilder()
                 .setTitle('🛡️ サーバー認証')
                 .setDescription('下のボタンを押して画像認証を完了させてください。')
@@ -198,6 +199,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setLabel('🔓 認証を開始する')
                     .setStyle(ButtonStyle.Primary)
             );
+
             await verifyChannel.send({ embeds: [verifyEmbed], components: [verifyRow] });
 
             // 相談・チケットパネルの送信
@@ -229,23 +231,7 @@ client.on('interactionCreate', async (interaction) => {
                 await consultChannel.send({ embeds: [consultEmbed], components: [row1, row2] });
             }
 
-            // ★ 追加：自己紹介パネルの送信
-            const selfIntroChannel = interaction.guild.channels.cache.get(SELF_INTRO_CHANNEL_ID) || interaction.channel;
-            const selfIntroEmbed = new EmbedBuilder()
-                .setTitle('👋 自己紹介パネル')
-                .setDescription('下のボタンを押すと入力フォームが開きます。入力した自己紹介は専用チャンネルに自動投稿されます。')
-                .setColor(0x57F287);
-
-            const selfIntroRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('open_self_intro_modal_btn')
-                    .setLabel('✏️ 自己紹介を書く')
-                    .setStyle(ButtonStyle.Success)
-            );
-
-            await selfIntroChannel.send({ embeds: [selfIntroEmbed], components: [selfIntroRow] });
-
-            await interaction.reply({ content: '✅ 各パネル（認証・相談・自己紹介）の設置が完了しました。', flags: MessageFlags.Ephemeral });
+            await interaction.reply({ content: '✅ 各パネルの設置が完了しました。', flags: MessageFlags.Ephemeral });
             return;
         }
 
@@ -282,6 +268,7 @@ client.on('interactionCreate', async (interaction) => {
                     components: [inputButton], 
                     flags: MessageFlags.Ephemeral 
                 });
+
                 return;
             }
 
@@ -305,6 +292,43 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
+            // ★ 認証完了後の「自己紹介を書く」ボタンが押された時
+            if (interaction.customId === 'open_self_intro_after_verify_btn') {
+                const modal = new ModalBuilder()
+                    .setCustomId('self_intro_modal')
+                    .setTitle('自己紹介カードの作成');
+
+                const nameInput = new TextInputBuilder()
+                    .setCustomId('intro_name')
+                    .setLabel('お名前・呼び方')
+                    .setPlaceholder('例: たろう')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
+
+                const hobbyInput = new TextInputBuilder()
+                    .setCustomId('intro_hobby')
+                    .setLabel('趣味・好きなゲーム等')
+                    .setPlaceholder('例: Discord Bot開発、APEX')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false);
+
+                const bioInput = new TextInputBuilder()
+                    .setCustomId('intro_bio')
+                    .setLabel('一言・自己紹介')
+                    .setPlaceholder('よろしくお願いします！')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true);
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(nameInput),
+                    new ActionRowBuilder().addComponents(hobbyInput),
+                    new ActionRowBuilder().addComponents(bioInput)
+                );
+
+                await interaction.showModal(modal);
+                return;
+            }
+
             // チケット発行ボタン
             if (interaction.customId === 'open_ticket_modal_btn') {
                 const modal = new ModalBuilder()
@@ -318,43 +342,6 @@ client.on('interactionCreate', async (interaction) => {
                     .setRequired(true);
 
                 modal.addComponents(new ActionRowBuilder().addComponents(input));
-                await interaction.showModal(modal);
-                return;
-            }
-
-            // ★ 追加：「自己紹介を書く」ボタンが押された時
-            if (interaction.customId === 'open_self_intro_modal_btn') {
-                const modal = new ModalBuilder()
-                    .setCustomId('self_intro_modal')
-                    .setTitle('自己紹介入力');
-
-                const nameInput = new TextInputBuilder()
-                    .setCustomId('intro_name')
-                    .setLabel('お名前・呼び方')
-                    .setPlaceholder('例: たろう')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true);
-
-                const hobbyInput = new TextInputBuilder()
-                    .setCustomId('intro_hobby')
-                    .setLabel('趣味・好きなゲームなど')
-                    .setPlaceholder('例: Discord Bot作成、APEX')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(false);
-
-                const bioInput = new TextInputBuilder()
-                    .setCustomId('intro_bio')
-                    .setLabel('一言メッセージ')
-                    .setPlaceholder('例: よろしくお願いします！')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                modal.addComponents(
-                    new ActionRowBuilder().addComponents(nameInput),
-                    new ActionRowBuilder().addComponents(hobbyInput),
-                    new ActionRowBuilder().addComponents(bioInput)
-                );
-
                 await interaction.showModal(modal);
                 return;
             }
@@ -395,7 +382,7 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- D. モーダル送信の処理 ---
         if (interaction.isModalSubmit()) {
-            // キャプチャ画像認証の解答入力
+            // ★ キャプチャ画像認証の解答入力（成功時に自己紹介案内ボタンを表示）
             if (interaction.customId === 'captcha_modal') {
                 const inputCode = interaction.fields.getTextInputValue('captcha_input');
                 const correctCode = captchaCodes.get(interaction.user.id);
@@ -405,6 +392,7 @@ client.on('interactionCreate', async (interaction) => {
                     return await interaction.reply({ content: '❌ 数字が違います。もう一度「🔓 認証を開始する」ボタンを押してやり直してください。', flags: MessageFlags.Ephemeral });
                 }
 
+                // 認証成功時処理
                 captchaCodes.delete(interaction.user.id);
                 const role = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
 
@@ -416,7 +404,49 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.message.react('📝').catch(() => {});
                 }
 
-                return await interaction.reply({ content: '🎉 画像認証が完了し、ロールを付与しました！サーバーをお楽しみください。', flags: MessageFlags.Ephemeral });
+                // 認証完了メッセージと一緒に「自己紹介を書く」ボタンを返信
+                const introBtnRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('open_self_intro_after_verify_btn')
+                        .setLabel('✏️ ついでに自己紹介を書く')
+                        .setStyle(ButtonStyle.Success)
+                );
+
+                return await interaction.reply({ 
+                    content: '🎉 画像認証が完了し、ロールを付与しました！\n続けて下のボタンから自己紹介を作成できます（任意）。', 
+                    components: [introBtnRow],
+                    flags: MessageFlags.Ephemeral 
+                });
+            }
+
+            // ★ 自己紹介モーダルの送信処理
+            if (interaction.customId === 'self_intro_modal') {
+                const name = interaction.fields.getTextInputValue('intro_name');
+                const hobby = interaction.fields.getTextInputValue('intro_hobby') || '未入力';
+                const bio = interaction.fields.getTextInputValue('intro_bio');
+
+                const introChannel = interaction.guild.channels.cache.get(SELF_INTRO_CHANNEL_ID);
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`📝 自己紹介Card：${name}`)
+                    .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
+                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+                    .setColor(0x57F287)
+                    .addFields(
+                        { name: '👤 お名前', value: name, inline: true },
+                        { name: '🎮 趣味・好きなこと', value: hobby, inline: true },
+                        { name: '💬 一言', value: bio }
+                    )
+                    .setFooter({ text: `ユーザーID: ${interaction.user.id}` })
+                    .setTimestamp();
+
+                if (introChannel) {
+                    await introChannel.send({ embeds: [embed] });
+                    await interaction.reply({ content: '✅ 自己紹介カードを投稿しました！サーバーをお楽しみください。', flags: MessageFlags.Ephemeral });
+                } else {
+                    await interaction.reply({ content: '✅ 自己紹介を送信しましたが、投稿先チャンネルが見つかりませんでした。', flags: MessageFlags.Ephemeral });
+                }
+                return;
             }
 
             // ユーザーからの相談送信モーダル
@@ -445,36 +475,6 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 await interaction.reply({ content: '✅ 内容を送信しました。対応をお待ちください。', flags: MessageFlags.Ephemeral });
-                return;
-            }
-
-            // ★ 追加：自己紹介モーダルの送信処理
-            if (interaction.customId === 'self_intro_modal') {
-                const name = interaction.fields.getTextInputValue('intro_name');
-                const hobby = interaction.fields.getTextInputValue('intro_hobby') || 'なし';
-                const bio = interaction.fields.getTextInputValue('intro_bio');
-
-                const selfIntroChannel = interaction.guild.channels.cache.get(SELF_INTRO_CHANNEL_ID);
-
-                const introEmbed = new EmbedBuilder()
-                    .setTitle(`📝 自己紹介 - ${name}`)
-                    .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
-                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-                    .setColor(0x57F287)
-                    .addFields(
-                        { name: '👤 名前', value: name, inline: true },
-                        { name: '🎮 趣味・好きなこと', value: hobby, inline: true },
-                        { name: '💬 一言メッセージ', value: bio }
-                    )
-                    .setFooter({ text: `User ID: ${interaction.user.id}` })
-                    .setTimestamp();
-
-                if (selfIntroChannel) {
-                    await selfIntroChannel.send({ embeds: [introEmbed] });
-                    await interaction.reply({ content: '✅ 自己紹介カードを投稿しました！', flags: MessageFlags.Ephemeral });
-                } else {
-                    await interaction.reply({ content: '❌ 自己紹介投稿用チャンネルが見つかりませんでした。', flags: MessageFlags.Ephemeral });
-                }
                 return;
             }
 
