@@ -40,13 +40,14 @@ const client = new Client({
 });
 
 // ID定数定義
-const REPORT_CHANNEL_ID = '1517865558136066201'; // 報告・注意ログ用チャンネル
-const AD_CHANNEL_ID = '1517868958768693309';     // 宣伝許可チャンネル
-const LOG_CHANNEL_ID = '1520424091792838779';    // 退出/キック/BAN/タイムアウト通知用チャンネル
-const CONSULT_CHANNEL_ID = '1517760332255461577'; // 相談・チケット用チャンネル
-const VERIFY_CHANNEL_ID = '1517692680191344690';  // 認証用チャンネル
-const BOT_ROLE_ID = '1520422736126804150';        // Bot用初期ロール
-const VERIFIED_ROLE_ID = '1517686961765093397';   // 認証完了時ロールID
+const REPORT_CHANNEL_ID = '1517865558136066201';     // 報告・注意ログ用チャンネル
+const AD_CHANNEL_ID = '1517868958768693309';         // 宣伝許可チャンネル
+const LOG_CHANNEL_ID = '1520424091792838779';        // 退出/キック/BAN/タイムアウト通知用チャンネル
+const CONSULT_CHANNEL_ID = '1517760332255461577';    // 相談・チケット用チャンネル
+const VERIFY_CHANNEL_ID = '1517692680191344690';     // 認証用チャンネル
+const SELF_INTRO_CHANNEL_ID = '1517865558136066201'; // ★自己紹介を投稿するチャンネルID（環境に合わせて適宜変更してください）
+const BOT_ROLE_ID = '1520422736126804150';            // Bot用初期ロール
+const VERIFIED_ROLE_ID = '1517686961765093397';       // 認証完了時ロールID
 
 // メモリデータ保持用
 const userMessageTracker = new Map(); 
@@ -81,7 +82,7 @@ process.on('uncaughtException', (err) => {
 const commands = [
     new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('認証パネルおよび相談パネルを設置します（管理者専用）')
+        .setDescription('各種パネル（認証・相談・自己紹介）を設置します（管理者専用）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ];
 
@@ -171,7 +172,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 });
 
 // -------------------------------------------------------------
-// 4. インタラクション処理 (認証・チケット・モーダル・返信機能・/setup)
+// 4. インタラクション処理 (認証・チケット・自己紹介・モーダル・返信機能・/setup)
 // -------------------------------------------------------------
 client.on('interactionCreate', async (interaction) => {
     try {
@@ -184,9 +185,8 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.reply({ content: '管理者権限が必要です。', flags: MessageFlags.Ephemeral });
             }
 
-            // 認証パネルの送信
+            // 1. 認証パネルの送信
             const verifyChannel = interaction.guild.channels.cache.get(VERIFY_CHANNEL_ID) || interaction.channel;
-            
             const verifyEmbed = new EmbedBuilder()
                 .setTitle('🛡️ サーバー認証')
                 .setDescription('下のボタンを押して画像認証を完了させてください。')
@@ -198,10 +198,9 @@ client.on('interactionCreate', async (interaction) => {
                     .setLabel('🔓 認証を開始する')
                     .setStyle(ButtonStyle.Primary)
             );
-
             await verifyChannel.send({ embeds: [verifyEmbed], components: [verifyRow] });
 
-            // 相談・チケットパネルの送信
+            // 2. 相談・チケットパネルの送信
             const consultChannel = interaction.guild.channels.cache.get(CONSULT_CHANNEL_ID);
             if (consultChannel) {
                 const consultEmbed = new EmbedBuilder()
@@ -230,26 +229,39 @@ client.on('interactionCreate', async (interaction) => {
                 await consultChannel.send({ embeds: [consultEmbed], components: [row1, row2] });
             }
 
-            await interaction.reply({ content: '✅ 各パネルの設置が完了しました。', flags: MessageFlags.Ephemeral });
+            // 3. ★自己紹介パネルの送信
+            const selfIntroChannel = interaction.guild.channels.cache.get(SELF_INTRO_CHANNEL_ID) || interaction.channel;
+            const selfIntroEmbed = new EmbedBuilder()
+                .setTitle('👋 自己紹介を作成')
+                .setDescription('下の「自己紹介を書く」ボタンを押すと入力フォームが表示されます。\n入力した内容は専用の自己紹介チャンネルに自動投稿されます！')
+                .setColor(0x57F287);
+
+            const selfIntroRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('open_self_intro_modal_btn')
+                    .setLabel('✏️ 自己紹介を書く')
+                    .setStyle(ButtonStyle.Success)
+            );
+
+            await selfIntroChannel.send({ embeds: [selfIntroEmbed], components: [selfIntroRow] });
+
+            await interaction.reply({ content: '✅ 各パネル（認証・相談・自己紹介）の設置が完了しました。', flags: MessageFlags.Ephemeral });
             return;
         }
 
         // --- B. ボタンの処理 ---
         if (interaction.isButton()) {
-            // 認証開始ボタンが押された時
+            // 認証開始ボタン
             if (interaction.customId === 'verify_button') {
                 const member = interaction.member;
 
-                // 指定ロール(1517686961765093397)を持っているか判定
                 if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
                     return await interaction.reply({ content: '✅ すでに認証済みです！', flags: MessageFlags.Ephemeral });
                 }
 
-                // 未認証の場合：4桁コード生成 & DummyImage URLでキャプチャ画像作成
                 const code = generateCaptchaCode();
                 captchaCodes.set(interaction.user.id, code);
 
-                // アプリケーション内追加パッケージ不要の動的画像生成URL
                 const imageUrl = `https://dummyimage.com/300x100/2f3136/00ff99.png&text=${code}`;
 
                 const captchaEmbed = new EmbedBuilder()
@@ -270,7 +282,6 @@ client.on('interactionCreate', async (interaction) => {
                     components: [inputButton], 
                     flags: MessageFlags.Ephemeral 
                 });
-
                 return;
             }
 
@@ -311,6 +322,43 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
+            // ★自己紹介作成ボタンが押された時
+            if (interaction.customId === 'open_self_intro_modal_btn') {
+                const modal = new ModalBuilder()
+                    .setCustomId('self_intro_modal')
+                    .setTitle('自己紹介カード作成');
+
+                const nameInput = new TextInputBuilder()
+                    .setCustomId('intro_name')
+                    .setLabel('お名前・呼び方')
+                    .setPlaceholder('例：たろう')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
+
+                const hobbyInput = new TextInputBuilder()
+                    .setCustomId('intro_hobby')
+                    .setLabel('趣味・好きなゲーム等')
+                    .setPlaceholder('例：Discord Bot開発、APEX')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false);
+
+                const bioInput = new TextInputBuilder()
+                    .setCustomId('intro_bio')
+                    .setLabel('一言・自己紹介')
+                    .setPlaceholder('よろしくお願いします！')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true);
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(nameInput),
+                    new ActionRowBuilder().addComponents(hobbyInput),
+                    new ActionRowBuilder().addComponents(bioInput)
+                );
+
+                await interaction.showModal(modal);
+                return;
+            }
+
             // 管理者用「返信」ボタン
             if (interaction.customId.startsWith('reply_consult_')) {
                 const targetUserId = interaction.customId.replace('reply_consult_', '');
@@ -347,7 +395,7 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- D. モーダル送信の処理 ---
         if (interaction.isModalSubmit()) {
-            // キャプチャ画像認証の解答入力
+            // 1. キャプチャ画像認証の解答入力
             if (interaction.customId === 'captcha_modal') {
                 const inputCode = interaction.fields.getTextInputValue('captcha_input');
                 const correctCode = captchaCodes.get(interaction.user.id);
@@ -357,7 +405,6 @@ client.on('interactionCreate', async (interaction) => {
                     return await interaction.reply({ content: '❌ 数字が違います。もう一度「🔓 認証を開始する」ボタンを押してやり直してください。', flags: MessageFlags.Ephemeral });
                 }
 
-                // 認証成功時処理
                 captchaCodes.delete(interaction.user.id);
                 const role = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
 
@@ -372,7 +419,7 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.reply({ content: '🎉 画像認証が完了し、ロールを付与しました！サーバーをお楽しみください。', flags: MessageFlags.Ephemeral });
             }
 
-            // ユーザーからの相談送信モーダル
+            // 2. ユーザーからの相談送信モーダル
             if (interaction.customId === 'consult_modal') {
                 const consultContent = interaction.fields.getTextInputValue('consult_content');
                 const consultChannel = interaction.guild.channels.cache.get(CONSULT_CHANNEL_ID);
@@ -401,7 +448,37 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
-            // 管理者からの返信送信モーダル
+            // 3. ★自己紹介送信モーダル処理
+            if (interaction.customId === 'self_intro_modal') {
+                const name = interaction.fields.getTextInputValue('intro_name');
+                const hobby = interaction.fields.getTextInputValue('intro_hobby') || '未入力';
+                const bio = interaction.fields.getTextInputValue('intro_bio');
+
+                const introChannel = interaction.guild.channels.cache.get(SELF_INTRO_CHANNEL_ID);
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`📝 自己紹介Card：${name}`)
+                    .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
+                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+                    .setColor(0x57F287)
+                    .addFields(
+                        { name: '👤 お名前', value: name, inline: true },
+                        { name: '🎮 趣味・好きなこと', value: hobby, inline: true },
+                        { name: '💬 一言', value: bio }
+                    )
+                    .setFooter({ text: `ユーザーID: ${interaction.user.id}` })
+                    .setTimestamp();
+
+                if (introChannel) {
+                    await introChannel.send({ embeds: [embed] });
+                    await interaction.reply({ content: '✅ 自己紹介を投稿しました！', flags: MessageFlags.Ephemeral });
+                } else {
+                    await interaction.reply({ content: '❌ 自己紹介チャンネルが見つかりませんでした。設定を確認してください。', flags: MessageFlags.Ephemeral });
+                }
+                return;
+            }
+
+            // 4. 管理者からの返信送信モーダル
             if (interaction.customId === 'reply_modal') {
                 const replyText = interaction.fields.getTextInputValue('reply_text');
                 const targetUserId = consultTargetUsers.get(interaction.user.id);
